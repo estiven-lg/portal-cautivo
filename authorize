@@ -1,0 +1,14 @@
+estudiante1    Cleartext-Password := "Estudiante123"
+               Reply-Message := "Rol: estudiante"
+
+estudiante2    Cleartext-Password := "Estudiante456"
+               Reply-Message := "Rol: estudiante"
+
+invitado1      Cleartext-Password := "Invitado123"
+               Reply-Message := "Rol: invitado"
+
+docente1       Cleartext-Password := "Docente123"
+               Reply-Message := "Rol: docente"
+
+docente2       Cleartext-Password := "Docente456"
+               Reply-Message := "Rol: docente"

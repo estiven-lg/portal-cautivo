@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    <title>Sesión activa | Portal-Lab</title>
+    <link rel="stylesheet" href="{{PORTAL_URL}}styles.css">
+    <script src="{{PORTAL_URL}}portal.js" defer></script>
+</head>
+<body class="portal-page" data-role="{{ROLE}}">
+    <header class="site-header">
+        <a class="brand" href="{{PORTAL_URL}}" aria-label="Portal-Lab, inicio">
+            <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+            <span>Portal-Lab</span>
+        </a>
+        <span class="network-name">Red académica</span>
+    </header>
+
+    <main>
+        <section class="access-summary" aria-labelledby="welcome-title">
+            <div class="summary-copy">
+                <div class="status-line">
+                    <span class="status-dot" aria-hidden="true"></span>
+                    <span>Acceso concedido</span>
+                </div>
+                <p class="eyebrow">{{ROLE_LABEL}}</p>
+                <h1 id="welcome-title">Hola, {{USERNAME}}</h1>
+                <p class="summary-message">Tu dispositivo fue autenticado correctamente por el servidor RADIUS.</p>
+            </div>
+
+            <aside class="session-panel" aria-labelledby="session-title">
+                <div>
+                    <p class="eyebrow" id="session-title">Tiempo de sesión</p>
+                    <p id="session-timer" class="timer" data-seconds="{{SESSION_TIMEOUT}}" aria-live="polite">{{TIMER_TEXT}}</p>
+                </div>
+                <div class="radius-message">
+                    <span>Respuesta RADIUS</span>
+                    <strong>{{REPLY_MESSAGE}}</strong>
+                </div>
+            </aside>
+        </section>
+
+        <section id="expired-notice" class="expired-notice" aria-live="assertive" hidden>
+            <div>
+                <p class="eyebrow">Sesión finalizada</p>
+                <h2>El tiempo comunicado por RADIUS llegó a cero</h2>
+                <p>Este contador es demostrativo. La regla de acceso de red permanece activa hasta que el administrador la retire.</p>
+            </div>
+            <a class="button button-dark" href="{{PORTAL_URL}}">Volver al acceso</a>
+        </section>
+
+        {{ROLE_CONTENT}}
+    </main>
+
+    <footer class="site-footer">
+        <p>Portal-Lab · Laboratorio de Comunicaciones II</p>
+        <p>Autenticación y políticas con RADIUS</p>
+    </footer>
+</body>
+</html>

@@ -1,33 +1,54 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Portal-Lab</title>
+    <meta name="color-scheme" content="light">
+    <title>Acceso | Portal-Lab</title>
+    <link rel="stylesheet" href="{{PORTAL_URL}}styles.css">
 </head>
+<body class="login-page">
+    <header class="site-header">
+        <a class="brand" href="{{PORTAL_URL}}" aria-label="Portal-Lab, inicio">
+            <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+            <span>Portal-Lab</span>
+        </a>
+        <span class="network-name">Red académica</span>
+    </header>
 
-<body>
+    <main class="login-main">
+        <section class="login-intro" aria-labelledby="page-title">
+            <p class="eyebrow">Comunicaciones II</p>
+            <h1 id="page-title">Conéctate a la red del laboratorio</h1>
+            <p class="intro-copy">Autentica tu dispositivo para recibir el acceso y las políticas asignadas a tu perfil.</p>
+            <div class="protocol-strip" aria-label="Características de la conexión">
+                <div><strong>RADIUS</strong><span>Autenticación</span></div>
+                <div><strong>WPA2</strong><span>Red protegida</span></div>
+                <div><strong>Portal</strong><span>Acceso por rol</span></div>
+            </div>
+        </section>
 
-    <h1>Portal-Lab</h1>
+        <section class="login-panel" aria-labelledby="login-title">
+            <h2 id="login-title">Iniciar sesión</h2>
+            <p class="panel-copy">Usa las credenciales asignadas para este laboratorio.</p>
+            {{ERROR_PANEL}}
+            <form method="POST" action="{{PORTAL_URL}}login">
+                <div class="form-field">
+                    <label for="usuario">Usuario</label>
+                    <input type="text" id="usuario" name="usuario" value="{{USERNAME}}" autocomplete="username" required autofocus>
+                </div>
+                <div class="form-field">
+                    <label for="clave">Contraseña</label>
+                    <input type="password" id="clave" name="clave" autocomplete="current-password" required>
+                </div>
+                <button class="button button-primary" type="submit">Acceder a la red</button>
+            </form>
+        </section>
+    </main>
 
-    <p>Bienvenido al portal de acceso.</p>
-    <p>Ingrese sus credenciales para continuar.</p>
-
-    <form method="POST" action="/login">
-        <label for="usuario">Usuario:</label>
-        <input type="text" id="usuario" name="usuario">
-
-        <br><br>
-
-        <label for="clave">Contraseña:</label>
-        <input type="password" id="clave" name="clave">
-
-        <br><br>
-
-        <button type="submit">Iniciar sesión</button>
-    </form>
-
+    <footer class="login-footer">
+        <p>Portal cautivo de demostración</p>
+        <p>El acceso queda asociado a la IP del dispositivo</p>
+    </footer>
 </body>
-
 </html>

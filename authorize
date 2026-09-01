@@ -1,14 +1,19 @@
 estudiante1    Cleartext-Password := "Estudiante123"
-               Reply-Message := "Rol: estudiante"
+               Reply-Message := "Rol: estudiante",
+               Session-Timeout := 900
 
 estudiante2    Cleartext-Password := "Estudiante456"
-               Reply-Message := "Rol: estudiante"
+               Reply-Message := "Rol: estudiante",
+               Session-Timeout := 900
 
 invitado1      Cleartext-Password := "Invitado123"
-               Reply-Message := "Rol: invitado"
+               Reply-Message := "Rol: invitado",
+               Session-Timeout := 300
 
 docente1       Cleartext-Password := "Docente123"
-               Reply-Message := "Rol: docente"
+               Reply-Message := "Rol: docente",
+               Session-Timeout := 1800
 
 docente2       Cleartext-Password := "Docente456"
-               Reply-Message := "Rol: docente"
+               Reply-Message := "Rol: docente",
+               Session-Timeout := 1800

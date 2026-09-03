@@ -2,8 +2,8 @@
 
 Laboratorio de Comunicaciones II que combina `hostapd`, `dnsmasq`, FreeRADIUS,
 `iptables` y un portal HTTP en Python. El servidor RADIUS no solo acepta o
-rechaza credenciales: también devuelve atributos que personalizan la landing
-del usuario.
+rechaza credenciales: también devuelve atributos que personalizan la landing y
+registra el uso de la red mediante RADIUS Accounting.
 
 ## Perfiles de demostración
 
@@ -30,10 +30,11 @@ un rol reconocido recibe una landing general.
    [`portal.conf`](portal.conf).
 4. Confirma que exista la cadena `PORTAL_AUTH` y la redirección HTTP del portal
    antes de iniciar la aplicación.
-5. Revisa `RADIUS_SERVER`, `RADIUS_SECRET` y `RADIUS_PORT` en
+5. Revisa `RADIUS_SERVER`, `RADIUS_SECRET`, `RADIUS_PORT` y
+   `RADIUS_ACCOUNTING_PORT` en
    [`portal-cautivo/portal.py`](portal-cautivo/portal.py). Si cambia la puerta de
    enlace, actualiza también `PORTAL_URL` para que apunte a la IP del portal.
-   `RADIUS_TIMEOUT` limita cuánto espera el formulario cuando el servicio no
+   `RADIUS_TIMEOUT` limita cuánto espera el portal cuando el servicio no
    responde.
 
 Instala la dependencia de Python y ejecuta el portal desde cualquier directorio:
@@ -61,10 +62,34 @@ El diccionario local declara los atributos estándar utilizados por `pyrad`:
   `Rol: docente`.
 - `Session-Timeout` (27, integer): duración comunicada por RADIUS en segundos.
 
-El contador mostrado en la landing es deliberadamente visual. Cuando llega a
-cero, la página avisa que la sesión expiró, pero no elimina las reglas de
-`iptables` ni interrumpe la conectividad. Esta limitación aparece también en la
-propia interfaz para evitar confundir la demostración con una revocación real.
+El diccionario también declara los atributos de Accounting necesarios para
+identificar la sesión, el usuario, la IP asignada, el NAS, la duración y la
+causa de finalización.
+
+## RADIUS Accounting
+
+Por cada acceso aceptado, el portal crea un `Acct-Session-Id` único y envía al
+puerto UDP `1813`:
+
+- `Accounting-Start` al habilitar el acceso.
+- `Interim-Update` cada 60 segundos con `Acct-Session-Time`.
+- `Accounting-Stop` al cerrar la sesión, vencer `Session-Timeout` o detener el
+  portal.
+
+FreeRADIUS debe reconocer a `127.0.0.1` como cliente usando el mismo secreto
+`testing123` y tener habilitado el bloque `accounting` de su servidor virtual.
+Con la configuración estándar, el módulo `detail` guarda los eventos bajo el
+directorio `radacct` de FreeRADIUS; la ubicación exacta depende de la
+distribución.
+
+El registro incluye duración y datos de identificación de la sesión. No incluye
+contadores de bytes porque el portal no recibe esa información directamente de
+RADIUS.
+
+Cuando el contador llega a cero, el servidor retira las reglas de `iptables`,
+envía `Accounting-Stop` con causa `Session-Timeout` y el dispositivo vuelve a
+quedar detrás del portal cautivo. El botón **Cerrar sesión** realiza el mismo
+proceso con causa `User-Request`.
 
 ## Contenido editable
 

@@ -38,6 +38,10 @@
                     <span>Respuesta RADIUS</span>
                     <strong>{{REPLY_MESSAGE}}</strong>
                 </div>
+                <form class="session-logout" method="POST" action="{{PORTAL_URL}}logout">
+                    <input type="hidden" name="session_id" value="{{SESSION_ID}}">
+                    <button class="button button-secondary" type="submit">Cerrar sesión</button>
+                </form>
             </aside>
         </section>
 
@@ -45,7 +49,7 @@
             <div>
                 <p class="eyebrow">Sesión finalizada</p>
                 <h2>El tiempo comunicado por RADIUS llegó a cero</h2>
-                <p>Este contador es demostrativo. La regla de acceso de red permanece activa hasta que el administrador la retire.</p>
+                <p>El portal retiró el acceso de red y finalizó la sesión.</p>
             </div>
             <a class="button button-dark" href="{{PORTAL_URL}}">Volver al acceso</a>
         </section>
@@ -55,7 +59,7 @@
 
     <footer class="site-footer">
         <p>Portal-Lab · Laboratorio de Comunicaciones II</p>
-        <p>Autenticación y políticas con RADIUS</p>
+        <p>Autenticación, políticas y Accounting con RADIUS</p>
     </footer>
 </body>
 </html>

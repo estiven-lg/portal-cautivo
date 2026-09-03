@@ -1,10 +1,13 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import re
 import subprocess
+import threading
+import time
 from urllib.parse import parse_qs, urlsplit
+from uuid import uuid4
 
 import pyrad.client
 import pyrad.packet
@@ -22,8 +25,12 @@ PORTAL_ORIGIN = PORTAL_URL.rstrip("/")
 RADIUS_SERVER = "127.0.0.1"
 RADIUS_SECRET = b"testing123"
 RADIUS_PORT = 1812
+RADIUS_ACCOUNTING_PORT = 1813
 RADIUS_TIMEOUT = 2
 RADIUS_RETRIES = 1
+NAS_IP_ADDRESS = "10.10.0.1"
+NAS_IDENTIFIER = "portal-lab"
+ACCOUNTING_UPDATE_INTERVAL = 60
 
 CAPTIVE_PROBE_PATHS = {
     "/generate_204",
@@ -95,6 +102,27 @@ class AuthResult:
     @property
     def accepted(self):
         return self.status == "accepted"
+
+
+@dataclass
+class NetworkSession:
+    username: str
+    client_ip: str
+    role: str
+    session_timeout: int | None
+    session_id: str = field(default_factory=lambda: uuid4().hex)
+    started_at: float = field(default_factory=time.monotonic)
+    stop_event: threading.Event = field(default_factory=threading.Event)
+    termination_cause: str = "User-Request"
+    revoke_access: bool = True
+    worker: threading.Thread | None = None
+
+    def elapsed_seconds(self):
+        return max(0, int(time.monotonic() - self.started_at))
+
+
+ACTIVE_SESSIONS = {}
+SESSIONS_LOCK = threading.Lock()
 
 
 def _first_attribute(packet, name):
@@ -176,6 +204,50 @@ def autenticar_radius(usuario, clave):
         return AuthResult(status="unavailable")
 
 
+def enviar_accounting(session, status_type, terminate_cause=None):
+    """Envia un evento de accounting sin modificar el estado de acceso."""
+    try:
+        cliente = pyrad.client.Client(
+            server=RADIUS_SERVER,
+            acctport=RADIUS_ACCOUNTING_PORT,
+            secret=RADIUS_SECRET,
+            dict=RADIUS_DICTIONARY,
+            timeout=RADIUS_TIMEOUT,
+            retries=RADIUS_RETRIES,
+        )
+        paquete = cliente.CreateAcctPacket(code=pyrad.packet.AccountingRequest)
+        paquete["Acct-Status-Type"] = status_type
+        paquete["Acct-Delay-Time"] = 0
+        paquete["Acct-Session-Id"] = session.session_id
+        paquete["Acct-Authentic"] = "RADIUS"
+        paquete["Acct-Session-Time"] = session.elapsed_seconds()
+        paquete["User-Name"] = session.username
+        paquete["Framed-IP-Address"] = session.client_ip
+        paquete["NAS-IP-Address"] = NAS_IP_ADDRESS
+        paquete["NAS-Identifier"] = NAS_IDENTIFIER
+        paquete["NAS-Port"] = 0
+        if terminate_cause:
+            paquete["Acct-Terminate-Cause"] = terminate_cause
+
+        respuesta = cliente.SendPacket(paquete)
+        if respuesta.code != pyrad.packet.AccountingResponse:
+            print(
+                f"Accounting {status_type} recibio respuesta inesperada: {respuesta.code}",
+                flush=True,
+            )
+            return False
+
+        print(
+            f"Accounting {status_type}: usuario={session.username}, "
+            f"sesion={session.session_id}, tiempo={session.elapsed_seconds()}s",
+            flush=True,
+        )
+        return True
+    except Exception as error:
+        print(f"Error enviando Accounting {status_type}: {error}", flush=True)
+        return False
+
+
 def cliente_autorizado(ip_cliente):
     """Verifica si la IP ya tiene reglas de autorizacion activas."""
     filter_ok = subprocess.run(
@@ -211,6 +283,117 @@ def autorizar_cliente(ip_cliente):
         check=True,
     )
     print(f"Reglas de autorizacion insertadas para {ip_cliente}")
+
+
+def desautorizar_cliente(ip_cliente):
+    """Retira las reglas de acceso asociadas a una IP, si existen."""
+    commands = (
+        ["iptables", "-D", "PORTAL_AUTH", "-s", ip_cliente, "-j", "ACCEPT"],
+        [
+            "iptables", "-t", "nat", "-D", "PREROUTING", "-s", ip_cliente,
+            "-p", "tcp", "--dport", "80", "-j", "ACCEPT",
+        ],
+    )
+    for command in commands:
+        subprocess.run(command, capture_output=True)
+    print(f"Reglas de autorizacion retiradas para {ip_cliente}", flush=True)
+
+
+def _finalizar_sesion(session, terminate_cause):
+    with SESSIONS_LOCK:
+        is_current = ACTIVE_SESSIONS.get(session.client_ip) is session
+        if is_current:
+            ACTIVE_SESSIONS.pop(session.client_ip, None)
+
+    if is_current and session.revoke_access:
+        desautorizar_cliente(session.client_ip)
+
+    enviar_accounting(session, "Stop", terminate_cause)
+    print(
+        f"SESION FINALIZADA: {session.username} ({session.client_ip}), "
+        f"causa={terminate_cause}",
+        flush=True,
+    )
+
+
+def _vigilar_sesion(session):
+    enviar_accounting(session, "Start")
+
+    while True:
+        elapsed = session.elapsed_seconds()
+        if session.session_timeout is not None:
+            remaining = session.session_timeout - elapsed
+            if remaining <= 0:
+                _finalizar_sesion(session, "Session-Timeout")
+                return
+            wait_time = min(ACCOUNTING_UPDATE_INTERVAL, remaining)
+        else:
+            wait_time = ACCOUNTING_UPDATE_INTERVAL
+
+        if session.stop_event.wait(wait_time):
+            _finalizar_sesion(session, session.termination_cause)
+            return
+
+        if (
+            session.session_timeout is not None
+            and session.elapsed_seconds() >= session.session_timeout
+        ):
+            _finalizar_sesion(session, "Session-Timeout")
+            return
+
+        enviar_accounting(session, "Interim-Update")
+
+
+def registrar_sesion(usuario, ip_cliente, result):
+    session = NetworkSession(
+        username=usuario,
+        client_ip=ip_cliente,
+        role=result.role,
+        session_timeout=result.session_timeout,
+    )
+
+    with SESSIONS_LOCK:
+        previous = ACTIVE_SESSIONS.get(ip_cliente)
+        ACTIVE_SESSIONS[ip_cliente] = session
+
+    if previous:
+        previous.revoke_access = False
+        previous.termination_cause = "User-Request"
+        previous.stop_event.set()
+
+    session.worker = threading.Thread(
+        target=_vigilar_sesion,
+        args=(session,),
+        name=f"acct-{session.session_id[:8]}",
+        daemon=True,
+    )
+    session.worker.start()
+    return session
+
+
+def solicitar_fin_sesion(ip_cliente, session_id, terminate_cause="User-Request"):
+    with SESSIONS_LOCK:
+        session = ACTIVE_SESSIONS.get(ip_cliente)
+        if session is None or session.session_id != session_id:
+            return False
+        session.termination_cause = terminate_cause
+        session.revoke_access = True
+        session.stop_event.set()
+        return True
+
+
+def finalizar_todas_las_sesiones():
+    with SESSIONS_LOCK:
+        sessions = list(ACTIVE_SESSIONS.values())
+
+    for session in sessions:
+        session.termination_cause = "NAS-Reboot"
+        session.revoke_access = True
+        session.stop_event.set()
+
+    for session in sessions:
+        if session.worker:
+            session.worker.join(timeout=RADIUS_TIMEOUT + 1)
 
 
 def load_template(name):
@@ -317,7 +500,7 @@ def render_role_content(role):
     )
 
 
-def render_landing(usuario, result):
+def render_landing(usuario, result, session_id):
     timeout = result.session_timeout
     timer_value = str(timeout) if timeout else ""
     timer_text = "Calculando..." if timeout else "Sin límite comunicado"
@@ -329,6 +512,7 @@ def render_landing(usuario, result):
         ROLE=escape(result.role, quote=True),
         ROLE_LABEL=escape(ROLE_LABELS[result.role]),
         REPLY_MESSAGE=escape(reply_message),
+        SESSION_ID=escape(session_id, quote=True),
         SESSION_TIMEOUT=timer_value,
         TIMER_TEXT=timer_text,
         ROLE_CONTENT=render_role_content(result.role),
@@ -366,6 +550,13 @@ class PortalHandler(BaseHTTPRequestHandler):
     def _send_html(self, status, content):
         self._send_bytes(status, content.encode("utf-8"), "text/html; charset=utf-8")
 
+    def _send_portal_redirect(self):
+        self.send_response(303)
+        self.send_header("Location", PORTAL_URL)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
     def do_GET(self):
         path = urlsplit(self.path).path
         if path in CAPTIVE_PROBE_PATHS:
@@ -398,7 +589,8 @@ class PortalHandler(BaseHTTPRequestHandler):
         self.send_error(404, "Recurso no encontrado")
 
     def do_POST(self):
-        if urlsplit(self.path).path != "/login":
+        path = urlsplit(self.path).path
+        if path not in {"/login", "/logout"}:
             self.send_error(404, "Recurso no encontrado")
             return
 
@@ -410,6 +602,13 @@ class PortalHandler(BaseHTTPRequestHandler):
 
         body = self.rfile.read(length).decode("utf-8", errors="replace")
         data = parse_qs(body)
+
+        if path == "/logout":
+            session_id = data.get("session_id", [""])[0]
+            solicitar_fin_sesion(self.client_address[0], session_id)
+            self._send_portal_redirect()
+            return
+
         usuario = data.get("usuario", [""])[0].strip()
         clave = data.get("clave", [""])[0]
 
@@ -434,14 +633,22 @@ class PortalHandler(BaseHTTPRequestHandler):
             self._send_html(500, render_login("No fue posible habilitar el acceso de red.", usuario))
             return
 
+        session = registrar_sesion(usuario, ip_cliente, result)
         print(f"ACCESO ACEPTADO: {usuario} ({ip_cliente}), rol={result.role}", flush=True)
-        self._send_html(200, render_landing(usuario, result))
+        self._send_html(200, render_landing(usuario, result, session.session_id))
 
 
 def main():
     server = ThreadingHTTPServer((HOST, PORT), PortalHandler)
-    print(f"Portal cautivo escuchando en http://{HOST}:{PORT}")
-    server.serve_forever()
+    print(f"Portal cautivo escuchando en http://{HOST}:{PORT}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("Cerrando sesiones activas...", flush=True)
+    finally:
+        server.shutdown()
+        server.server_close()
+        finalizar_todas_las_sesiones()
 
 
 if __name__ == "__main__":
